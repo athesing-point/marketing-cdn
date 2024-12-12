@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 
 # Custom domain configuration
 #routes = [
-#    { pattern = "cdn.designxdevelop.com", custom_domain = true }
+#    { pattern = "cdn.point.com", custom_domain = true }
 #]
 
 # Bind an R2 Bucket for CDN storage
