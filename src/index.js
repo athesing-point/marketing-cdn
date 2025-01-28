@@ -24,6 +24,7 @@ const CONTENT_TYPES = {
 	ttf: 'font/ttf',
 	eot: 'application/vnd.ms-fontobject',
 	pdf: 'application/pdf',
+	zip: 'application/zip',
 };
 
 // File types that should be previewed in browser
@@ -37,15 +38,17 @@ export default {
 			const path = url.pathname.slice(1); // Remove leading slash
 			const forceDownload = url.searchParams.get('download') === 'true';
 
+			// Redirect root path to point.com
 			if (!path) {
-				return new Response('Not Found', { status: 404 });
+				return Response.redirect('https://point.com', 302);
 			}
 
 			// Get the file from R2
 			const object = await env.CDN_BUCKET.get(path);
 
 			if (!object) {
-				return new Response('Not Found', { status: 404 });
+				// Redirect 404s to point.com
+				return Response.redirect('https://point.com', 302);
 			}
 
 			// Determine content type based on file extension
@@ -71,7 +74,8 @@ export default {
 				headers,
 			});
 		} catch (error) {
-			return new Response('Internal Server Error', { status: 500 });
+			// Redirect errors to point.com as well
+			return Response.redirect('https://point.com', 302);
 		}
 	},
 };
