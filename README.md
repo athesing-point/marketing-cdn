@@ -32,7 +32,7 @@ Assets can be uploaded to the R2 bucket through:
 Assets can be accessed through the CDN URL:
 
 ```
-https://[your-cdn-domain]/path/to/asset
+https://files.point.com/asset-name-path
 ```
 
 ## Configuration
