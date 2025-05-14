@@ -13,3 +13,7 @@ compatibility_flags = ["nodejs_compat"]
 [[r2_buckets]]
 binding = "CDN_BUCKET"
 bucket_name = "marketing-cdn"
+
+[observability]
+enabled = true
+head_sampling_rate = 1 # optional. default = 1.
