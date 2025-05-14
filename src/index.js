@@ -71,41 +71,73 @@ export default {
 				headers.set('Content-Disposition', 'inline');
 			}
 
-			// Handle Range requests for mp4 files
-			if (extension === 'mp4' && request.headers.has('range')) {
-				const range = request.headers.get('range');
-				const size = object.size;
-				const match = /bytes=(\d*)-(\d*)/.exec(range);
-				let start = 0;
-				let end = size - 1;
-				if (match) {
-					if (match[1]) start = parseInt(match[1], 10);
-					if (match[2]) end = parseInt(match[2], 10);
-				}
-				if (start > end || start < 0 || end >= size) {
-					return new Response('Requested Range Not Satisfiable', {
-						status: 416,
-						headers: {
-							'Content-Range': `bytes */${size}`,
-						},
-					});
-				}
-				const partial = await object.body.slice(start, end + 1);
-				headers.set('Content-Range', `bytes ${start}-${end}/${size}`);
+			// Handle MP4 files specially for streaming
+			if (extension === 'mp4') {
 				headers.set('Accept-Ranges', 'bytes');
-				headers.set('Content-Length', (end - start + 1).toString());
-				return new Response(partial, {
-					status: 206,
-					headers,
-				});
+				headers.set('Content-Length', object.size.toString());
+
+				// Handle range requests
+				if (request.headers.has('range')) {
+					try {
+						const range = request.headers.get('range');
+						const size = object.size;
+						const match = /bytes=(\d*)-(\d*)/.exec(range);
+
+						if (!match) {
+							return new Response('Invalid Range Header', {
+								status: 400,
+								headers: {
+									'Accept-Ranges': 'bytes',
+									'Content-Range': `bytes */${size}`,
+								},
+							});
+						}
+
+						let start = match[1] ? parseInt(match[1], 10) : 0;
+						let end = match[2] ? parseInt(match[2], 10) : size - 1;
+
+						// Handle open-ended ranges (e.g., bytes=0-)
+						if (match[1] && !match[2]) {
+							// For open-ended ranges, limit to 1MB chunks
+							end = Math.min(start + 1024 * 1024 - 1, size - 1);
+						}
+
+						// Validate ranges
+						if (start < 0 || start >= size || end >= size || start > end) {
+							return new Response('Requested Range Not Satisfiable', {
+								status: 416,
+								headers: {
+									'Content-Range': `bytes */${size}`,
+									'Accept-Ranges': 'bytes',
+								},
+							});
+						}
+
+						const partial = await object.body.slice(start, end + 1);
+						headers.set('Content-Range', `bytes ${start}-${end}/${size}`);
+						headers.set('Content-Length', (end - start + 1).toString());
+
+						return new Response(partial, {
+							status: 206,
+							headers,
+						});
+					} catch (error) {
+						console.error('Range request error:', error);
+						// Fall back to sending the full file
+						headers.set('Content-Range', `bytes */${object.size}`);
+						return new Response(object.body, {
+							headers,
+						});
+					}
+				}
 			}
 
 			return new Response(object.body, {
 				headers,
 			});
 		} catch (error) {
-			// Redirect errors to point.com as well
-			return Response.redirect('https://point.com', 302);
+			console.error(error);
+			return new Response('Internal Server Error', { status: 500 });
 		}
 	},
 };
