@@ -25,6 +25,7 @@ const CONTENT_TYPES = {
 	eot: 'application/vnd.ms-fontobject',
 	pdf: 'application/pdf',
 	zip: 'application/zip',
+	mp4: 'video/mp4',
 };
 
 // File types that should be previewed in browser
@@ -68,6 +69,35 @@ export default {
 				headers.set('Content-Disposition', `attachment; filename="${path.split('/').pop()}"`);
 			} else if (PREVIEW_TYPES.has(extension)) {
 				headers.set('Content-Disposition', 'inline');
+			}
+
+			// Handle Range requests for mp4 files
+			if (extension === 'mp4' && request.headers.has('range')) {
+				const range = request.headers.get('range');
+				const size = object.size;
+				const match = /bytes=(\d*)-(\d*)/.exec(range);
+				let start = 0;
+				let end = size - 1;
+				if (match) {
+					if (match[1]) start = parseInt(match[1], 10);
+					if (match[2]) end = parseInt(match[2], 10);
+				}
+				if (start > end || start < 0 || end >= size) {
+					return new Response('Requested Range Not Satisfiable', {
+						status: 416,
+						headers: {
+							'Content-Range': `bytes */${size}`,
+						},
+					});
+				}
+				const partial = await object.body.slice(start, end + 1);
+				headers.set('Content-Range', `bytes ${start}-${end}/${size}`);
+				headers.set('Accept-Ranges', 'bytes');
+				headers.set('Content-Length', (end - start + 1).toString());
+				return new Response(partial, {
+					status: 206,
+					headers,
+				});
 			}
 
 			return new Response(object.body, {
