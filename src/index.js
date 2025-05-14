@@ -29,7 +29,7 @@ const CONTENT_TYPES = {
 };
 
 // File types that should be previewed in browser
-const PREVIEW_TYPES = new Set(['pdf', 'html', 'htm', 'jpg', 'jpeg', 'png', 'gif', 'svg', 'webp']);
+const PREVIEW_TYPES = new Set(['pdf', 'html', 'htm', 'jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'mp4']);
 
 export default {
 	async fetch(request, env, ctx) {
