@@ -55,10 +55,10 @@ jobs:
           URLS=()
           while read -r file; do
             if [[ "$file" == dist/prod/* ]]; then
-              CDN_URL="https://marketing-cdn.ops-1df.workers.dev/code/prod/${file#dist/prod/}"
+              CDN_URL="https://files.point.com/code/prod/${file#dist/prod/}"
               URLS+=("\"$CDN_URL\"")
             elif [[ "$file" == dist/staging/* ]]; then
-              CDN_URL="https://marketing-cdn.ops-1df.workers.dev/code/staging/${file#dist/staging/}"
+              CDN_URL="https://files.point.com/code/staging/${file#dist/staging/}"
               URLS+=("\"$CDN_URL\"")
             fi
           done < changed_files.txt
