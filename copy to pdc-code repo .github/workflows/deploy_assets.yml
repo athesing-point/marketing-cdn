@@ -45,8 +45,13 @@ jobs:
       - name: Get changed files in dist/prod and dist/staging
         id: changed_files
         run: |
-          git fetch origin ${{ github.event.before }}
-          git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E '^dist/(prod|staging)/' || true > changed_files.txt
+          if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
+            # Initial push: list all prod/staging assets
+            git ls-files 'dist/{prod,staging}/**' > changed_files.txt
+          else
+            git fetch origin ${{ github.event.before }}
+            git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E '^dist/(prod|staging)/' || true > changed_files.txt
+          fi
           cat changed_files.txt
 
       - name: Build CDN URLs to purge
