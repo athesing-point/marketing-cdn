@@ -14,8 +14,8 @@ This CDN serves marketing assets through Cloudflare's global edge network, provi
 
 ## Important Links
 
-- [R2 Bucket Dashboard](https://dash.cloudflare.com/1df4880142e9b3ccb4341bf7e97c57ff/workers/services/view/marketing-cdn/production?time-window=1440&versionFilter=all)
-- [Workers Dashboard](https://dash.cloudflare.com/1df4880142e9b3ccb4341bf7e97c57ff/r2/default/buckets/marketing-cdn)
+- [R2 Bucket Dashboard](https://dash.cloudflare.com/YOUR_ACCOUNT_ID/workers/services/view/marketing-cdn/production?time-window=1440&versionFilter=all)
+- [Workers Dashboard](https://dash.cloudflare.com/YOUR_ACCOUNT_ID/r2/default/buckets/marketing-cdn)
 
 ## Usage
 
