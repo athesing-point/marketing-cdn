@@ -1,0 +1,130 @@
+name: Deploy Assets to R2
+
+on:
+  push:
+    branches:
+      - staging
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      R2_BUCKET: CDN_BUCKET
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wrangler
+        run: npm install -g wrangler
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [[ "${GITHUB_REF##*/}" == "main" ]]; then
+            echo "env=production" >> $GITHUB_OUTPUT
+          else
+            echo "env=staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Sync assets to R2
+        run: |
+          wrangler r2 bucket create $R2_BUCKET || true
+          wrangler r2 object put $R2_BUCKET --file ./ --prefix "${{ steps.env.outputs.env }}/" --recursive
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Get changed files in dist/prod and dist/staging
+        id: changed_files
+        run: |
+          if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
+            # Initial push: list all prod/staging assets
+            git ls-files 'dist/{prod,staging}/**' > changed_files.txt
+          else
+            git fetch origin ${{ github.event.before }}
+            git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E '^dist/(prod|staging)/' || true > changed_files.txt
+          fi
+          cat changed_files.txt
+
+      - name: Build CDN URLs to purge
+        id: build_urls
+        run: |
+          URLS=()
+          while read -r file; do
+            if [[ "$file" == dist/prod/* ]]; then
+              CDN_URL="https://files.point.com/code/prod/${file#dist/prod/}"
+              URLS+=("\"$CDN_URL\"")
+            elif [[ "$file" == dist/staging/* ]]; then
+              CDN_URL="https://files.point.com/code/staging/${file#dist/staging/}"
+              URLS+=("\"$CDN_URL\"")
+            fi
+          done < changed_files.txt
+          echo "urls=[$(IFS=,; echo "${URLS[*]}")]" >> $GITHUB_OUTPUT
+
+      - name: Purge Cloudflare cache for updated files
+        if: steps.build_urls.outputs.urls != "[]"
+        run: |
+          # Function to attempt cache purge with error handling
+          purge_cache() {
+            local attempt=$1
+            echo "Attempting cache purge (attempt $attempt/3)..."
+            
+            # Make the API call and capture response
+            response=$(curl -s -w "%{http_code}" -X POST \
+              "https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE_ID }}/purge_cache" \
+              -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              --data "{\"files\":${{ steps.build_urls.outputs.urls }}}")
+            
+            # Extract HTTP status code (last 3 characters)
+            http_code="${response: -3}"
+            # Extract response body (everything except last 3 characters)
+            response_body="${response%???}"
+            
+            echo "HTTP Status Code: $http_code"
+            echo "Response: $response_body"
+            
+            # Check if HTTP request was successful
+            if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+              # Check if Cloudflare API response indicates success
+              if echo "$response_body" | grep -q '"success":true'; then
+                echo "✅ Cache purge successful"
+                return 0
+              else
+                echo "❌ Cloudflare API returned success=false"
+                echo "$response_body" | grep -o '"errors":\[[^]]*\]' || echo "No error details available"
+                return 1
+              fi
+            else
+              echo "❌ HTTP request failed with status code: $http_code"
+              return 1
+            fi
+          }
+
+          # Retry logic
+          max_attempts=3
+          for attempt in $(seq 1 $max_attempts); do
+            if purge_cache $attempt; then
+              exit 0
+            else
+              if [ $attempt -lt $max_attempts ]; then
+                echo "⏳ Waiting 5 seconds before retry..."
+                sleep 5
+              else
+                echo "❌ Cache purge failed after $max_attempts attempts"
+                echo "::error::Failed to purge Cloudflare cache for updated files"
+                exit 1
+              fi
+            fi
+          done
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}

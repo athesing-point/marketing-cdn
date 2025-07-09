@@ -31,6 +31,9 @@ const CONTENT_TYPES = {
 // File types that should be previewed in browser
 const PREVIEW_TYPES = new Set(['pdf', 'html', 'htm', 'jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'mp4']);
 
+// File types that should be compressed
+const COMPRESSIBLE_TYPES = new Set(['js', 'css', 'html', 'htm', 'json', 'svg', 'xml', 'txt']);
+
 // Generate unique filename by adding -1, -2, etc. if file exists
 async function getUniqueFilename(bucket, originalName) {
 	const extension = originalName.includes('.') ? originalName.split('.').pop() : '';
@@ -257,7 +260,7 @@ function getSuccessHTML(filename, cdnUrl) {
 }
 
 export default {
-	async fetch(request, env, ctx) {
+	async fetch(request, env) {
 		try {
 			// Parse the URL and get the pathname
 			const url = new URL(request.url);
@@ -384,19 +387,48 @@ export default {
 			const extension = path.split('.').pop().toLowerCase();
 			const contentType = CONTENT_TYPES[extension] || 'application/octet-stream';
 
+			// Check if this is a /code path request for compression
+			const isCodePath = path.startsWith('code/');
+			const shouldCompress = isCodePath && COMPRESSIBLE_TYPES.has(extension);
+
 			// Prepare headers with caching
 			const headers = new Headers({
 				'Content-Type': contentType,
 				'Cache-Control': 'public, max-age=31536000',
 				'Access-Control-Allow-Origin': '*',
 				ETag: object.httpEtag,
+				'Last-Modified': object.uploaded.toUTCString(),
 			});
+
+			// Add Vary header for compressed content
+			if (shouldCompress) {
+				headers.set('Vary', 'Accept-Encoding');
+			}
 
 			// Set Content-Disposition based on file type and download parameter
 			if (forceDownload) {
 				headers.set('Content-Disposition', `attachment; filename="${path.split('/').pop()}"`);
 			} else if (PREVIEW_TYPES.has(extension)) {
 				headers.set('Content-Disposition', 'inline');
+			}
+
+			// Handle compression for text-based assets in /code path
+			let responseBody = object.body;
+			if (shouldCompress) {
+				const acceptEncoding = request.headers.get('Accept-Encoding') || '';
+
+				if (acceptEncoding.includes('gzip')) {
+					try {
+						// Compress the response body
+						const stream = new CompressionStream('gzip');
+						responseBody = object.body.pipeThrough(stream);
+						headers.set('Content-Encoding', 'gzip');
+					} catch (error) {
+						console.error('Compression error:', error);
+						// Fallback to uncompressed content
+						responseBody = object.body;
+					}
+				}
 			}
 
 			// Handle MP4 files specially for streaming
@@ -460,7 +492,7 @@ export default {
 				}
 			}
 
-			return new Response(object.body, {
+			return new Response(responseBody, {
 				headers,
 			});
 		} catch (error) {
