@@ -1,0 +1,76 @@
+name: Deploy Assets to R2
+
+on:
+  push:
+    branches:
+      - staging
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      R2_BUCKET: CDN_BUCKET
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wrangler
+        run: npm install -g wrangler
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [[ "${GITHUB_REF##*/}" == "main" ]]; then
+            echo "env=production" >> $GITHUB_OUTPUT
+          else
+            echo "env=staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Sync assets to R2
+        run: |
+          wrangler r2 bucket create $R2_BUCKET || true
+          wrangler r2 object put $R2_BUCKET --file ./ --prefix "${{ steps.env.outputs.env }}/" --recursive
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Get changed files in dist/prod and dist/staging
+        id: changed_files
+        run: |
+          git fetch origin ${{ github.event.before }}
+          git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E '^dist/(prod|staging)/' || true > changed_files.txt
+          cat changed_files.txt
+
+      - name: Build CDN URLs to purge
+        id: build_urls
+        run: |
+          URLS=()
+          while read -r file; do
+            if [[ "$file" == dist/prod/* ]]; then
+              CDN_URL="https://marketing-cdn.ops-1df.workers.dev/code/prod/${file#dist/prod/}"
+              URLS+=("\"$CDN_URL\"")
+            elif [[ "$file" == dist/staging/* ]]; then
+              CDN_URL="https://marketing-cdn.ops-1df.workers.dev/code/staging/${file#dist/staging/}"
+              URLS+=("\"$CDN_URL\"")
+            fi
+          done < changed_files.txt
+          echo "urls=[$(IFS=,; echo "${URLS[*]}")]" >> $GITHUB_OUTPUT
+
+      - name: Purge Cloudflare cache for updated files
+        if: steps.build_urls.outputs.urls != "[]"
+        run: |
+          curl -X POST "https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE_ID }}/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data "{\"files\":${{ steps.build_urls.outputs.urls }}}"
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
