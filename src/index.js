@@ -416,12 +416,18 @@ export default {
 			let responseBody = object.body;
 			if (shouldCompress) {
 				const acceptEncoding = request.headers.get('Accept-Encoding') || '';
-				
+
 				if (acceptEncoding.includes('gzip')) {
-					// Compress the response body
-					const stream = new CompressionStream('gzip');
-					responseBody = object.body.pipeThrough(stream);
-					headers.set('Content-Encoding', 'gzip');
+					try {
+						// Compress the response body
+						const stream = new CompressionStream('gzip');
+						responseBody = object.body.pipeThrough(stream);
+						headers.set('Content-Encoding', 'gzip');
+					} catch (error) {
+						console.error('Compression error:', error);
+						// Fallback to uncompressed content
+						responseBody = object.body;
+					}
 				}
 			}
 

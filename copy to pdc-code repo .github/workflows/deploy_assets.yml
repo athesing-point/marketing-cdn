@@ -67,10 +67,59 @@ jobs:
       - name: Purge Cloudflare cache for updated files
         if: steps.build_urls.outputs.urls != "[]"
         run: |
-          curl -X POST "https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE_ID }}/purge_cache" \
-            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            --data "{\"files\":${{ steps.build_urls.outputs.urls }}}"
+          # Function to attempt cache purge with error handling
+          purge_cache() {
+            local attempt=$1
+            echo "Attempting cache purge (attempt $attempt/3)..."
+            
+            # Make the API call and capture response
+            response=$(curl -s -w "%{http_code}" -X POST \
+              "https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE_ID }}/purge_cache" \
+              -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              --data "{\"files\":${{ steps.build_urls.outputs.urls }}}")
+            
+            # Extract HTTP status code (last 3 characters)
+            http_code="${response: -3}"
+            # Extract response body (everything except last 3 characters)
+            response_body="${response%???}"
+            
+            echo "HTTP Status Code: $http_code"
+            echo "Response: $response_body"
+            
+            # Check if HTTP request was successful
+            if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+              # Check if Cloudflare API response indicates success
+              if echo "$response_body" | grep -q '"success":true'; then
+                echo "✅ Cache purge successful"
+                return 0
+              else
+                echo "❌ Cloudflare API returned success=false"
+                echo "$response_body" | grep -o '"errors":\[[^]]*\]' || echo "No error details available"
+                return 1
+              fi
+            else
+              echo "❌ HTTP request failed with status code: $http_code"
+              return 1
+            fi
+          }
+
+          # Retry logic
+          max_attempts=3
+          for attempt in $(seq 1 $max_attempts); do
+            if purge_cache $attempt; then
+              exit 0
+            else
+              if [ $attempt -lt $max_attempts ]; then
+                echo "⏳ Waiting 5 seconds before retry..."
+                sleep 5
+              else
+                echo "❌ Cache purge failed after $max_attempts attempts"
+                echo "::error::Failed to purge Cloudflare cache for updated files"
+                exit 1
+              fi
+            fi
+          done
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
